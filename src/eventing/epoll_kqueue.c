@@ -21,8 +21,12 @@
 
 #if defined(LIBUS_USE_EPOLL) || defined(LIBUS_USE_KQUEUE)
 
-/* Cannot include this one on Windows */
+/* Upstream: this file is not used on Windows.
+ * Our build: compiled on Windows via wepoll (epoll emulation).
+ */
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 
 #ifdef LIBUS_USE_EPOLL
 #define GET_READY_POLL(loop, index) (struct us_poll_t *) loop->ready_polls[index].data.ptr
@@ -454,5 +458,81 @@ void us_internal_async_wakeup(struct us_internal_async *a) {
     kevent(internal_cb->loop->fd, &event, 1, NULL, 0, NULL);
 }
 #endif
+
+/* --- BEGIN PATCH: single-iteration loop for external reactor (Zig/tofu) ---
+ *
+ * This function runs exactly one poll iteration:
+ *   - calls us_internal_loop_pre
+ *   - performs epoll_wait / kevent
+ *   - dispatches ready polls via us_internal_dispatch_ready_poll
+ *   - calls us_internal_loop_post
+ *
+ * It is equivalent to one iteration of us_loop_run(), but does not loop.
+ *
+ * Added for integration with a pull-based reactor (no callbacks).
+ * Original uSockets does not expose such API; Bun has a similar function.
+ *
+ * License: Apache 2.0 — original header retained, modification documented.
+ */
+
+void us_loop_run_tick(struct us_loop_t *loop, int timeout_ms) {
+    int num_ready = 0;
+
+    /* same as in us_loop_run() */
+    us_internal_loop_pre(loop);
+
+#ifdef LIBUS_USE_EPOLL
+
+    num_ready = epoll_wait(
+        loop->fd,
+        loop->ready_polls,
+        loop->num_ready_polls,
+        timeout_ms
+    );
+
+#elif defined(LIBUS_USE_KQUEUE)
+
+    struct timespec ts;
+    struct timespec *tsp = NULL;
+
+    if (timeout_ms >= 0) {
+        ts.tv_sec = timeout_ms / 1000;
+        ts.tv_nsec = (timeout_ms % 1000) * 1000000;
+        tsp = &ts;
+    }
+
+    num_ready = kevent(
+        loop->fd,
+        NULL,
+        0,
+        loop->ready_polls,
+        loop->num_ready_polls,
+        tsp
+    );
+
+#endif
+
+    if (num_ready > 0) {
+        loop->num_ready_polls = num_ready;
+
+        for (int i = 0; i < num_ready; i++) {
+            struct us_poll_t *poll = GET_READY_POLL(loop, i);
+
+            int events = us_poll_events(poll);
+
+            us_internal_dispatch_ready_poll(
+                poll,
+                /* error */ 0,
+                /* eof */ 0,
+                events
+            );
+        }
+    }
+
+    us_internal_loop_post(loop);
+}
+
+/* --- END PATCH --- */
+
 
 #endif

@@ -335,6 +335,8 @@ int us_socket_remote_port(int ssl, struct us_socket_t *s);
 /* Copy remote (IP) address of socket, or fail with zero length. */
 void us_socket_remote_address(int ssl, struct us_socket_t *s, char *buf, int *length);
 
+void us_loop_run_tick(struct us_loop_t *loop, int timeout_ms);
+
 #ifdef __cplusplus
 }
 #endif
