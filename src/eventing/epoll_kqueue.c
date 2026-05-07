@@ -523,7 +523,6 @@ void us_loop_run_tick(struct us_loop_t *loop, int timeout_ms) {
             us_internal_dispatch_ready_poll(
                 poll,
                 /* error */ 0,
-                /* eof */ 0,
                 events
             );
         }

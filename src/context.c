@@ -288,7 +288,8 @@ struct us_listen_socket_t *us_socket_context_listen_unix(int ssl, struct us_sock
     }
 #endif
 
-    LIBUS_SOCKET_DESCRIPTOR listen_socket_fd = bsd_create_listen_socket_unix(path, options);
+    /* strlen(path) is correct here: context.c paths are filesystem paths, not abstract namespace. */
+    LIBUS_SOCKET_DESCRIPTOR listen_socket_fd = bsd_create_listen_socket_unix(path, strlen(path), options);
 
     if (listen_socket_fd == LIBUS_SOCKET_ERROR) {
         return 0;
@@ -348,7 +349,8 @@ struct us_socket_t *us_socket_context_connect_unix(int ssl, struct us_socket_con
     }
 #endif
 
-    LIBUS_SOCKET_DESCRIPTOR connect_socket_fd = bsd_create_connect_socket_unix(server_path, options);
+    /* strlen(server_path) is correct here: context.c paths are filesystem paths, not abstract namespace. */
+    LIBUS_SOCKET_DESCRIPTOR connect_socket_fd = bsd_create_connect_socket_unix(server_path, strlen(server_path), options);
     if (connect_socket_fd == LIBUS_SOCKET_ERROR) {
         return 0;
     }

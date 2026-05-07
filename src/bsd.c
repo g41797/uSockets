@@ -547,35 +547,44 @@ LIBUS_SOCKET_DESCRIPTOR bsd_create_listen_socket(const char *host, int port, int
 #endif
 #include <sys/stat.h>
 #include <stddef.h>
-LIBUS_SOCKET_DESCRIPTOR bsd_create_listen_socket_unix(const char *path, int options) {
+/*
+ * PATCH (g41797/tofu integration): added pathlen parameter.
+ * Original took only (path, options) and used strlen(), which breaks Linux
+ * abstract namespace paths that start with '\0' (strlen returns 0 for those).
+ * pathlen must equal the byte count including the leading '\0' for abstract
+ * namespace, or strlen(path) for filesystem paths.
+ */
+LIBUS_SOCKET_DESCRIPTOR bsd_create_listen_socket_unix(const char *path, size_t pathlen, int options) {
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
 
-    LIBUS_SOCKET_DESCRIPTOR listenFd = LIBUS_SOCKET_ERROR;
+    if (pathlen >= sizeof(addr.sun_path)) {
+        errno = ENAMETOOLONG;
+        return LIBUS_SOCKET_ERROR;
+    }
+    memcpy(addr.sun_path, path, pathlen);
 
-    listenFd = bsd_create_socket(AF_UNIX, SOCK_STREAM, 0);
+    socklen_t addrlen;
+    if (pathlen > 0 && path[0] == '\0') {
+        /* Abstract namespace: addrlen includes the null prefix + the name bytes. */
+        addrlen = (socklen_t)(offsetof(struct sockaddr_un, sun_path) + pathlen);
+    } else {
+        /* Filesystem path: remove any leftover socket file before binding. */
+#ifdef _WIN32
+        _unlink(path);
+#else
+        unlink(path);
+#endif
+        addrlen = (socklen_t)(offsetof(struct sockaddr_un, sun_path) + strlen(addr.sun_path) + 1);
+    }
 
+    LIBUS_SOCKET_DESCRIPTOR listenFd = bsd_create_socket(AF_UNIX, SOCK_STREAM, 0);
     if (listenFd == LIBUS_SOCKET_ERROR) {
         return LIBUS_SOCKET_ERROR;
     }
 
-#ifndef _WIN32
-    // 700 permission by default
-    fchmod(listenFd, S_IRWXU);
-#else
-    _chmod(path, S_IREAD | S_IWRITE | S_IEXEC);
-#endif
-
-    struct sockaddr_un server_address;
-    memset(&server_address, 0, sizeof(server_address));
-    server_address.sun_family = AF_UNIX;
-    strcpy(server_address.sun_path, path);
-    int size = offsetof(struct sockaddr_un, sun_path) + strlen(server_address.sun_path);
-#ifdef _WIN32
-    _unlink(path);
-#else
-    unlink(path);
-#endif
-
-    if (bind(listenFd, (struct sockaddr *)&server_address, size) || listen(listenFd, 512)) {
+    if (bind(listenFd, (struct sockaddr *)&addr, addrlen) || listen(listenFd, 512)) {
         bsd_close_socket(listenFd);
         return LIBUS_SOCKET_ERROR;
     }
@@ -747,21 +756,86 @@ LIBUS_SOCKET_DESCRIPTOR bsd_create_connect_socket(const char *host, int port, co
     return fd;
 }
 
-LIBUS_SOCKET_DESCRIPTOR bsd_create_connect_socket_unix(const char *server_path, int options) {
+/*
+ * PATCH (g41797/tofu integration): added pathlen parameter; connect() error checked.
+ * Original took only (server_path, options), used strcpy + strlen (broke abstract
+ * namespace), and ignored the connect() return value (masked ENOENT for missing paths).
+ * Now: pathlen drives addrlen; connect() failure for any errno except EINPROGRESS
+ * (non-blocking connect in progress) closes the fd and returns LIBUS_SOCKET_ERROR.
+ */
+LIBUS_SOCKET_DESCRIPTOR bsd_create_connect_socket_unix(const char *server_path, size_t pathlen, int options) {
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
 
-    struct sockaddr_un server_address;
-    memset(&server_address, 0, sizeof(server_address));
-    server_address.sun_family = AF_UNIX;
-    strcpy(server_address.sun_path, server_path);
-    int size = offsetof(struct sockaddr_un, sun_path) + strlen(server_address.sun_path);
+    if (pathlen >= sizeof(addr.sun_path)) {
+        errno = ENAMETOOLONG;
+        return LIBUS_SOCKET_ERROR;
+    }
+    memcpy(addr.sun_path, server_path, pathlen);
+
+    socklen_t addrlen;
+    if (pathlen > 0 && server_path[0] == '\0') {
+        /* Abstract namespace. */
+        addrlen = (socklen_t)(offsetof(struct sockaddr_un, sun_path) + pathlen);
+    } else {
+        addrlen = (socklen_t)(offsetof(struct sockaddr_un, sun_path) + strlen(addr.sun_path) + 1);
+    }
 
     LIBUS_SOCKET_DESCRIPTOR fd = bsd_create_socket(AF_UNIX, SOCK_STREAM, 0);
-
     if (fd == LIBUS_SOCKET_ERROR) {
         return LIBUS_SOCKET_ERROR;
     }
 
-    connect(fd, (struct sockaddr *)&server_address, size);
+    if (connect(fd, (struct sockaddr *)&addr, addrlen) != 0) {
+        /* EINPROGRESS is expected for non-blocking sockets; all other errors are fatal. */
+        if (errno != EINPROGRESS) {
+            bsd_close_socket(fd);
+            return LIBUS_SOCKET_ERROR;
+        }
+    }
 
     return fd;
+}
+
+/*
+ * PATCH (g41797/tofu integration): added from vendor/bun-usockets.
+ * The upstream uSockets fork omitted this function; it is required by
+ * socket.c (bsd_socket_flush calls it indirectly) and by posix_net callers.
+ */
+int bsd_socket_keepalive(LIBUS_SOCKET_DESCRIPTOR fd, int on, unsigned int delay) {
+#ifndef _WIN32
+    if (setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &on, sizeof(on)))
+        return errno;
+    if (!on)
+        return 0;
+    if (delay == 0)
+        return -1;
+#ifdef TCP_KEEPIDLE
+    if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &delay, sizeof(delay)))
+        return errno;
+#elif defined(TCP_KEEPALIVE)
+    if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPALIVE, &delay, sizeof(delay)))
+        return errno;
+#endif
+#ifdef TCP_KEEPINTVL
+    int intvl = 1;
+    if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof(intvl)))
+        return errno;
+#endif
+#ifdef TCP_KEEPCNT
+    int cnt = 10;
+    if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof(cnt)))
+        return errno;
+#endif
+    return 0;
+#else
+    if (setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, (const char*)&on, sizeof(on)) == -1)
+        return WSAGetLastError();
+    if (!on)
+        return 0;
+    if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPALIVE, (const char*)&delay, sizeof(delay)) == -1)
+        return WSAGetLastError();
+    return 0;
+#endif
 }
