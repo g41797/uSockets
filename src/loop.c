@@ -186,12 +186,12 @@ long long us_loop_iteration_number(struct us_loop_t *loop) {
 void us_internal_loop_pre(struct us_loop_t *loop) {
     loop->data.iteration_nr++;
     us_internal_handle_low_priority_sockets(loop);
-    loop->data.pre_cb(loop);
+    if (loop->data.pre_cb) loop->data.pre_cb(loop);
 }
 
 void us_internal_loop_post(struct us_loop_t *loop) {
     us_internal_free_closed_sockets(loop);
-    loop->data.post_cb(loop);
+    if (loop->data.post_cb) loop->data.post_cb(loop);
 }
 
 struct us_socket_t *us_adopt_accepted_socket(int ssl, struct us_socket_context_t *context, LIBUS_SOCKET_DESCRIPTOR accepted_fd,
@@ -222,7 +222,7 @@ struct us_socket_t *us_adopt_accepted_socket(int ssl, struct us_socket_context_t
     return s;
 }
 
-void us_internal_dispatch_ready_poll(struct us_poll_t *p, int error, int events) {
+__attribute__((weak)) void us_internal_dispatch_ready_poll(struct us_poll_t *p, int error, int events) {
     switch (us_internal_poll_type(p)) {
     case POLL_TYPE_CALLBACK: {
             struct us_internal_callback_t *cb = (struct us_internal_callback_t *) p;

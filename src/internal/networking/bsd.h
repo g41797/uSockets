@@ -110,5 +110,7 @@ LIBUS_SOCKET_DESCRIPTOR bsd_create_connect_socket(const char *host, int port, co
 /* PATCH (g41797/tofu): added pathlen parameter; same convention as bsd_create_listen_socket_unix.
  * connect() error is now checked: non-EINPROGRESS failure closes the fd and returns LIBUS_SOCKET_ERROR. */
 LIBUS_SOCKET_DESCRIPTOR bsd_create_connect_socket_unix(const char *server_path, size_t pathlen, int options);
+int bsd_connect_socket_unix(LIBUS_SOCKET_DESCRIPTOR fd, const char *server_path, size_t pathlen);
+int bsd_connect_socket_unix(LIBUS_SOCKET_DESCRIPTOR fd, const char *server_path, size_t pathlen);
 
 #endif // BSD_H

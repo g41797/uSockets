@@ -839,3 +839,33 @@ int bsd_socket_keepalive(LIBUS_SOCKET_DESCRIPTOR fd, int on, unsigned int delay)
     return 0;
 #endif
 }
+
+int bsd_connect_socket_unix(LIBUS_SOCKET_DESCRIPTOR fd, const char *server_path, size_t pathlen) {
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(struct sockaddr_un));
+    addr.sun_family = AF_UNIX;
+    if (pathlen >= sizeof(addr.sun_path)) {
+#ifdef _WIN32
+        return 124; // ERROR_FILENAME_EXCED_RANGE
+#else
+        return 36; // ENAMETOOLONG
+#endif
+    }
+    memcpy(addr.sun_path, server_path, pathlen);
+    
+    size_t addrlen = sizeof(struct sockaddr_un);
+#ifndef _WIN32
+    if (server_path[0] == 0) {
+        addrlen = offsetof(struct sockaddr_un, sun_path) + pathlen;
+    }
+#endif
+
+    if (connect(fd, (struct sockaddr *) &addr, (socklen_t)addrlen) != 0) {
+#ifdef _WIN32
+        return WSAGetLastError();
+#else
+        return errno;
+#endif
+    }
+    return 0;
+}

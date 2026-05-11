@@ -486,7 +486,7 @@ void us_loop_run_tick(struct us_loop_t *loop, int timeout_ms) {
     num_ready = epoll_wait(
         loop->fd,
         loop->ready_polls,
-        loop->num_ready_polls,
+        1024,
         timeout_ms
     );
 
@@ -506,7 +506,7 @@ void us_loop_run_tick(struct us_loop_t *loop, int timeout_ms) {
         NULL,
         0,
         loop->ready_polls,
-        loop->num_ready_polls,
+        1024,
         tsp
     );
 
@@ -517,14 +517,22 @@ void us_loop_run_tick(struct us_loop_t *loop, int timeout_ms) {
 
         for (int i = 0; i < num_ready; i++) {
             struct us_poll_t *poll = GET_READY_POLL(loop, i);
-
-            int events = us_poll_events(poll);
-
-            us_internal_dispatch_ready_poll(
-                poll,
-                /* error */ 0,
-                events
-            );
+            if (poll) {
+#ifdef LIBUS_USE_EPOLL
+                int events = loop->ready_polls[i].events;
+                int error = loop->ready_polls[i].events & (EPOLLERR | EPOLLHUP);
+#else
+                int events = LIBUS_SOCKET_READABLE;
+                if (loop->ready_polls[i].filter == EVFILT_WRITE) {
+                    events = LIBUS_SOCKET_WRITABLE;
+                }
+                int error = loop->ready_polls[i].flags & (EV_ERROR | EV_EOF);
+#endif
+                events &= us_poll_events(poll);
+                if (events || error) {
+                    us_internal_dispatch_ready_poll(poll, error, events);
+                }
+            }
         }
     }
 
