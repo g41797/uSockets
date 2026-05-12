@@ -278,7 +278,8 @@ LIBUS_SOCKET_DESCRIPTOR apple_no_sigpipe(LIBUS_SOCKET_DESCRIPTOR fd) {
 
 LIBUS_SOCKET_DESCRIPTOR bsd_set_nonblocking(LIBUS_SOCKET_DESCRIPTOR fd) {
 #ifdef _WIN32
-    /* Libuv will set windows sockets as non-blocking */
+    u_long mode = 1;
+    ioctlsocket((SOCKET)fd, FIONBIO, &mode);
 #else
     fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
 #endif
