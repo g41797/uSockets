@@ -502,8 +502,7 @@ LIBUS_SOCKET_DESCRIPTOR bsd_create_listen_socket(const char *host, int port, int
         return LIBUS_SOCKET_ERROR;
     }
 
-    if (port != 0) {
-        /* Otherwise, always enable SO_REUSEPORT and SO_REUSEADDR _unless_ options specify otherwise */
+        /* Always enable SO_REUSEPORT and SO_REUSEADDR _unless_ options specify otherwise */
 #ifdef _WIN32
         if (options & LIBUS_LISTEN_EXCLUSIVE_PORT) {
             int optval2 = 1;
@@ -523,7 +522,6 @@ LIBUS_SOCKET_DESCRIPTOR bsd_create_listen_socket(const char *host, int port, int
         setsockopt(listenFd, SOL_SOCKET, SO_REUSEADDR, (void *) &enabled, sizeof(enabled));
 #endif
 
-    }
     
 #ifdef IPV6_V6ONLY
     int disabled = 0;
@@ -629,11 +627,7 @@ LIBUS_SOCKET_DESCRIPTOR bsd_create_udp_socket(const char *host, int port) {
         return LIBUS_SOCKET_ERROR;
     }
 
-    if (port != 0) {
         /* Should this also go for UDP? */
-        int enabled = 1;
-        setsockopt(listenFd, SOL_SOCKET, SO_REUSEADDR, (void *) &enabled, sizeof(enabled));
-    }
     
 #ifdef IPV6_V6ONLY
     int disabled = 0;
