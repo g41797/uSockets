@@ -466,6 +466,9 @@ int bsd_would_block() {
 
 // return LIBUS_SOCKET_ERROR or the fd that represents listen socket
 // listen both on ipv6 and ipv4
+// `port != 0` → format as `"%d"` string.
+// `port == 0` → pass `service = NULL` so `getaddrinfo` doesn’t see `"0"`
+// and won’t fail on edge‑casey Windows behavior; an ephemeral port is still assigned by `bind`.
 LIBUS_SOCKET_DESCRIPTOR bsd_create_listen_socket(const char *host, int port, int options) {
     struct addrinfo hints, *result;
     memset(&hints, 0, sizeof(struct addrinfo));
@@ -474,10 +477,17 @@ LIBUS_SOCKET_DESCRIPTOR bsd_create_listen_socket(const char *host, int port, int
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
 
+    // Let getaddrinfo accept NULL service for "unspecified" port.
+    // This is what you want when port == 0 (let bind assign ephemeral).
+    const char *port_str = NULL;
     char port_string[16];
-    snprintf(port_string, 16, "%d", port);
 
-    if (getaddrinfo(host, port_string, &hints, &result)) {
+    if (port != 0) {
+        snprintf(port_string, sizeof(port_string), "%d", port);
+        port_str = port_string;
+    }
+
+    if (getaddrinfo(host, port_str, &hints, &result)) {
         return LIBUS_SOCKET_ERROR;
     }
 
